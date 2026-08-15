@@ -8,12 +8,12 @@ version = "0.1.0"
 description = "Deterministic offline evaluation for retrieval, citations, no-answer, and groundedness."
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{name = "vigilanty0x"}]
 dependencies = []
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: Apache Software License",
   "Operating System :: OS Independent",
 ]
 
