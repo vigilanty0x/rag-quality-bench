@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools==80.9.0", "wheel==0.45.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "rag-quality-bench"
-version = "0.1.0"
-description = "Deterministic offline evaluation for retrieval, citations, no-answer, and groundedness."
+version = "0.2.0"
+description = "Deterministic offline RAG evaluation, retrieval experiments, evidence reports, and index manifests."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -26,3 +26,5 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+rag_quality_bench = ["data/*.json"]

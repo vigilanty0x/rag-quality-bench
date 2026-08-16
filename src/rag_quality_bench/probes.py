@@ -19,6 +19,7 @@ def readiness_probe() -> dict[str, Any]:
         "probe": "readiness",
         "runtime_dependencies": [],
         "schema_versions": ["1.0"],
+        "report_schema_versions": ["1.0", "2.0"],
         "judges": ["retrieval", "citation", "groundedness", "no_answer"],
     }
 
@@ -69,4 +70,3 @@ def functional_probe() -> dict[str, Any]:
         "counter_example_failed": counter_failed,
         "counter_failures": counter["records"][0]["failures"],
     }
-

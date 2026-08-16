@@ -6,3 +6,4 @@ The evaluator rejects a document if its content hash differs, its trust is not `
 
 Use reserved example domains and synthetic fixtures in public contributions. Keep private documents, customer names, internal URLs, secrets, and production index metadata out of the repository.
 
+Redacted index manifests omit source text but retain source IDs, document hashes, chunk IDs, and token counts. Those fields may still reveal sensitive naming or corpus shape, so inspect manifests before sharing them. Hash verification detects accidental or malicious mutation after creation; it does not authenticate an author.

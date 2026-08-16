@@ -17,6 +17,18 @@ class SuiteContractTests(unittest.TestCase):
         reversed_raw = dict(reversed(list(raw.items())))
         self.assertEqual(BenchmarkSuite.from_dict(raw).digest, BenchmarkSuite.from_dict(reversed_raw).digest)
 
+    def test_default_retrieval_preserves_released_schema_one_digest(self):
+        raw = suite_dict()
+        omitted = BenchmarkSuite.from_dict(raw)
+        raw["retrieval_strategy"] = "overlap"
+        raw["hybrid_weight"] = 0.5
+        explicit = BenchmarkSuite.from_dict(raw)
+        self.assertEqual(omitted.digest, explicit.digest)
+        self.assertEqual(
+            omitted.digest,
+            "e83fd2e9a6675c3104f9608913efb86eb04c917915cafa4b5a97c69568633bb9",
+        )
+
     def test_unknown_suite_field_fails(self):
         raw = suite_dict()
         raw["secret_mode"] = True
@@ -102,6 +114,12 @@ class SuiteContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "duplicates"):
             BenchmarkSuite.from_dict(raw)
 
+    def test_duplicate_expected_source_ids_fail(self):
+        raw = suite_dict()
+        raw["questions"][0]["expected_source_ids"] = ["handbook", "handbook"]
+        with self.assertRaisesRegex(ContractError, "expected_source_ids contains duplicates"):
+            BenchmarkSuite.from_dict(raw)
+
     def test_invalid_document_hash_shape_fails_contract(self):
         raw = suite_dict()
         raw["documents"][0]["sha256"] = "bad"
@@ -115,3 +133,33 @@ class SuiteContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractError, "invalid JSON"):
             BenchmarkSuite.from_json("{")
 
+    def test_duplicate_json_keys_are_rejected(self):
+        raw = json.dumps(suite_dict()).replace('"suite_id":', '"suite_id":"shadow","suite_id":', 1)
+        with self.assertRaisesRegex(ContractError, "duplicate JSON key"):
+            BenchmarkSuite.from_json(raw)
+
+    def test_retrieval_strategy_and_hybrid_weight_are_bounded(self):
+        raw = suite_dict()
+        raw["retrieval_strategy"] = "bm25"
+        raw["hybrid_weight"] = 0.7
+        parsed = BenchmarkSuite.from_dict(raw)
+        self.assertEqual(parsed.retrieval_strategy, "bm25")
+        self.assertEqual(parsed.hybrid_weight, 0.7)
+        raw["retrieval_strategy"] = "opaque-remote-model"
+        with self.assertRaisesRegex(ContractError, "retrieval_strategy"):
+            BenchmarkSuite.from_dict(raw)
+        raw = suite_dict()
+        raw["hybrid_weight"] = 2
+        with self.assertRaisesRegex(ContractError, "hybrid_weight"):
+            BenchmarkSuite.from_dict(raw)
+
+    def test_extreme_hybrid_weight_is_a_contract_error(self):
+        raw = suite_dict()
+        raw["hybrid_weight"] = 10**400
+        with self.assertRaisesRegex(ContractError, "hybrid_weight"):
+            BenchmarkSuite.from_dict(raw)
+
+    def test_extreme_json_integer_is_a_contract_error(self):
+        payload = json.dumps(suite_dict()).replace('"chunk_size": 12', '"chunk_size": ' + "9" * 5000)
+        with self.assertRaisesRegex(ContractError, "invalid JSON"):
+            BenchmarkSuite.from_json(payload)

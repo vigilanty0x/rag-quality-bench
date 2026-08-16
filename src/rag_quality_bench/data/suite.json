@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0",
+  "suite_id": "public-rag-example",
+  "version": "1.0.0",
+  "evaluation_date": "2026-09-02",
+  "chunk_size": 20,
+  "chunk_overlap": 4,
+  "retrieval_k": 3,
+  "documents": [
+    {
+      "source_id": "aurora-guide",
+      "title": "Aurora public guide",
+      "source_url": "https://example.invalid/aurora-guide",
+      "license": "CC0-1.0",
+      "observed_at": "2026-09-01",
+      "expires_at": "2027-09-01",
+      "trust": "trusted",
+      "content": "The Aurora conference is hosted in Geneva. Registration closes on September 1. The event color is teal.",
+      "sha256": "5cbd523cd1eed74361609c66db23c3394997ae9448dfd7fefb23510e0fbcc42b"
+    },
+    {
+      "source_id": "obsolete-draft",
+      "title": "Obsolete synthetic draft",
+      "source_url": "https://example.invalid/obsolete-draft",
+      "license": "CC0-1.0",
+      "observed_at": "2025-01-01",
+      "expires_at": "2025-12-31",
+      "trust": "untrusted",
+      "content": "An obsolete draft says the Aurora conference is hosted in Paris.",
+      "sha256": "8675bbaf0ea96f5b10f98b49ad55708af3832c8c83794144e49f88c1c797f85d"
+    }
+  ],
+  "questions": [
+    {
+      "question_id": "host-city",
+      "text": "What city hosts the Aurora conference?",
+      "expected_source_ids": ["aurora-guide"],
+      "no_answer": false,
+      "adversarial": false,
+      "response": {
+        "answer": "The Aurora conference is hosted in Geneva.",
+        "claims": [
+          {
+            "text": "Aurora conference is hosted in Geneva",
+            "citations": ["aurora-guide"]
+          }
+        ]
+      }
+    },
+    {
+      "question_id": "unknown-winner",
+      "text": "Who won the 2030 fictional award?",
+      "expected_source_ids": [],
+      "no_answer": true,
+      "adversarial": true,
+      "response": {"answer": null, "claims": []}
+    },
+    {
+      "question_id": "unsupported-color",
+      "text": "What color is the Aurora event?",
+      "expected_source_ids": ["aurora-guide"],
+      "no_answer": false,
+      "adversarial": true,
+      "response": {
+        "answer": "The event color is royal purple.",
+        "claims": [
+          {
+            "text": "The Aurora event color is royal purple",
+            "citations": ["aurora-guide"]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -14,14 +14,25 @@ ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 TRUST_STATES = {"trusted", "untrusted", "blocked"}
+RETRIEVAL_STRATEGIES = {"overlap", "bm25", "tfidf", "hybrid"}
 MAX_DOCUMENTS = 200
 MAX_QUESTIONS = 500
 MAX_CONTENT_CHARS = 200_000
 MAX_TEXT_CHARS = 10_000
+MAX_SUITE_BYTES = 5_000_000
 
 
 class ContractError(ValueError):
     """Raised when public input violates the bounded schema."""
+
+
+def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ContractError(f"duplicate JSON key: {key}")
+        value[key] = item
+    return value
 
 
 def _mapping(value: Any, name: str) -> dict[str, Any]:
@@ -203,6 +214,8 @@ class Question:
             _identifier(item, "question.expected_source_id")
             for item in _list(data.get("expected_source_ids"), "question.expected_source_ids")
         )
+        if len(expected) != len(set(expected)):
+            raise ContractError("question.expected_source_ids contains duplicates")
         no_answer = data.get("no_answer")
         adversarial = data.get("adversarial", False)
         if not isinstance(no_answer, bool) or not isinstance(adversarial, bool):
@@ -243,6 +256,8 @@ class BenchmarkSuite:
     retrieval_k: int
     documents: tuple[Document, ...]
     questions: tuple[Question, ...]
+    retrieval_strategy: str = "overlap"
+    hybrid_weight: float = 0.5
 
     @classmethod
     def from_dict(cls, raw: Any) -> "BenchmarkSuite":
@@ -250,6 +265,7 @@ class BenchmarkSuite:
         allowed = {
             "schema_version", "suite_id", "version", "evaluation_date", "chunk_size",
             "chunk_overlap", "retrieval_k", "documents", "questions",
+            "retrieval_strategy", "hybrid_weight",
         }
         unknown = set(data) - allowed
         if unknown:
@@ -262,12 +278,23 @@ class BenchmarkSuite:
         chunk_size = data.get("chunk_size")
         overlap = data.get("chunk_overlap")
         retrieval_k = data.get("retrieval_k")
-        if not isinstance(chunk_size, int) or not 8 <= chunk_size <= 500:
+        if isinstance(chunk_size, bool) or not isinstance(chunk_size, int) or not 8 <= chunk_size <= 500:
             raise ContractError("suite.chunk_size must be between 8 and 500")
-        if not isinstance(overlap, int) or not 0 <= overlap < chunk_size:
+        if isinstance(overlap, bool) or not isinstance(overlap, int) or not 0 <= overlap < chunk_size:
             raise ContractError("suite.chunk_overlap must be non-negative and smaller than chunk_size")
-        if not isinstance(retrieval_k, int) or not 1 <= retrieval_k <= 20:
+        if isinstance(retrieval_k, bool) or not isinstance(retrieval_k, int) or not 1 <= retrieval_k <= 20:
             raise ContractError("suite.retrieval_k must be between 1 and 20")
+        strategy = data.get("retrieval_strategy", "overlap")
+        if strategy not in RETRIEVAL_STRATEGIES:
+            raise ContractError(f"suite.retrieval_strategy must be one of {sorted(RETRIEVAL_STRATEGIES)}")
+        weight = data.get("hybrid_weight", 0.5)
+        if (
+            isinstance(weight, bool)
+            or not isinstance(weight, (int, float))
+            or not 0 <= weight <= 1
+            or not math_is_finite(weight)
+        ):
+            raise ContractError("suite.hybrid_weight must be a finite number between 0 and 1")
         documents_raw = _list(data.get("documents"), "suite.documents")
         questions_raw = _list(data.get("questions"), "suite.questions")
         if not 1 <= len(documents_raw) <= MAX_DOCUMENTS:
@@ -300,20 +327,31 @@ class BenchmarkSuite:
             retrieval_k=retrieval_k,
             documents=documents,
             questions=questions,
+            retrieval_strategy=strategy,
+            hybrid_weight=float(weight),
         )
 
     @classmethod
     def from_json(cls, text: str) -> "BenchmarkSuite":
-        if len(text) > 5_000_000:
+        if not isinstance(text, str):
             raise ContractError("suite JSON exceeds 5 MB")
         try:
-            raw = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ContractError(f"invalid JSON: {exc.msg}") from exc
+            encoded_size = len(text.encode("utf-8"))
+        except UnicodeEncodeError as exc:
+            raise ContractError("suite must be valid UTF-8 text") from exc
+        if encoded_size > MAX_SUITE_BYTES:
+            raise ContractError("suite JSON exceeds 5 MB")
+        try:
+            raw = json.loads(text, object_pairs_hook=_unique_object)
+        except ContractError:
+            raise
+        except (json.JSONDecodeError, ValueError) as exc:
+            message = exc.msg if isinstance(exc, json.JSONDecodeError) else str(exc)
+            raise ContractError(f"invalid JSON: {message}") from exc
         return cls.from_dict(raw)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "schema_version": self.schema_version,
             "suite_id": self.suite_id,
             "version": self.version,
@@ -324,8 +362,21 @@ class BenchmarkSuite:
             "documents": [document.to_dict() for document in self.documents],
             "questions": [question.to_dict() for question in self.questions],
         }
+        # Preserve schema-1.0 digests for suites created before retrieval options
+        # existed. Explicit defaults and omitted defaults are semantically equal.
+        if self.retrieval_strategy != "overlap" or self.hybrid_weight != 0.5:
+            value["retrieval_strategy"] = self.retrieval_strategy
+            value["hybrid_weight"] = self.hybrid_weight
+        return value
 
     @property
     def digest(self) -> str:
         return canonical_sha256(self.to_dict())
 
+
+def math_is_finite(value: int | float) -> bool:
+    """Avoid importing a numerical dependency for one contract check."""
+
+    if isinstance(value, int):
+        return True
+    return value == value and value not in {float("inf"), float("-inf")}

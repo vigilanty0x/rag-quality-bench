@@ -71,6 +71,25 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("does not exist", stderr)
 
+    def test_suite_size_is_rejected_before_an_unbounded_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            oversized = Path(directory) / "oversized.json"
+            oversized.write_bytes(b" " * 5_000_001)
+            code, _, stderr = self.invoke(["validate", "--suite", str(oversized)])
+            self.assertEqual(code, 2)
+            self.assertIn("exceeds 5 MB", stderr)
+
+    def test_extreme_numeric_input_has_a_bounded_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw = json.loads(EXAMPLE.read_text(encoding="utf-8"))
+            raw["hybrid_weight"] = 10**400
+            path = Path(directory) / "extreme.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            code, _, stderr = self.invoke(["validate", "--suite", str(path)])
+            self.assertEqual(code, 2)
+            self.assertIn("hybrid_weight", stderr)
+            self.assertNotIn("Traceback", stderr)
+
     def test_demo_is_reproducible_logically(self):
         with tempfile.TemporaryDirectory() as directory:
             first = Path(directory) / "one.json"
@@ -80,3 +99,24 @@ class CliTests(unittest.TestCase):
             self.assertEqual((code1, code2), (0, 0))
             self.assertEqual(json.loads(out1)["semantic_sha256"], json.loads(out2)["semantic_sha256"])
 
+    def test_index_sweep_and_export_commands(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / "index.json"
+            code, stdout, _ = self.invoke(["index", "--suite", str(EXAMPLE), "--strategy", "bm25", "--output", str(manifest)])
+            self.assertEqual(code, 0)
+            self.assertTrue(json.loads(stdout)["valid"])
+            verify_code, _, _ = self.invoke(["verify-index", "--manifest", str(manifest)])
+            self.assertEqual(verify_code, 0)
+
+            sweep = root / "sweep.json"
+            code, stdout, _ = self.invoke(["sweep", "--suite", str(EXAMPLE), "--strategies", "overlap,bm25", "--chunk-sizes", "12,20", "--overlaps", "0,2", "--output", str(sweep)])
+            self.assertEqual(code, 0)
+            self.assertEqual(len(json.loads(stdout)["runs"]), 8)
+
+            report = root / "report.json"
+            self.invoke(["run", "--suite", str(EXAMPLE), "--output", str(report)])
+            output = root / "report.html"
+            code, _, _ = self.invoke(["export", "--report", str(report), "--format", "html", "--output", str(output)])
+            self.assertEqual(code, 0)
+            self.assertIn("<!doctype html>", output.read_text(encoding="utf-8").lower())

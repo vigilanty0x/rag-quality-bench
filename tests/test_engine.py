@@ -1,4 +1,6 @@
+from copy import deepcopy
 import unittest
+from unittest.mock import patch
 
 from fixtures import StepClock, suite, suite_dict
 from rag_quality_bench.engine import (
@@ -9,6 +11,7 @@ from rag_quality_bench.engine import (
     tokenize,
 )
 from rag_quality_bench.models import BenchmarkSuite, Document, content_sha256
+from rag_quality_bench.retrieval import RetrievalError
 
 
 class EngineTests(unittest.TestCase):
@@ -132,3 +135,53 @@ class EngineTests(unittest.TestCase):
         report = BenchmarkEngine(BenchmarkSuite.from_dict(raw), clock=StepClock(1)).run()
         self.assertEqual(report["metrics"]["fresh_coverage"], 0.5)
 
+    def test_bm25_and_hybrid_reports_include_ranking_metrics(self):
+        for strategy in ("bm25", "tfidf", "hybrid"):
+            raw = suite_dict()
+            raw["retrieval_strategy"] = strategy
+            report = BenchmarkEngine(BenchmarkSuite.from_dict(raw), clock=StepClock(1)).run()
+            first = report["records"][0]
+            self.assertEqual(first["retrieval_strategy"], strategy)
+            self.assertEqual(first["reciprocal_rank"], 1.0)
+            self.assertEqual(first["ndcg_at_k"], 1.0)
+            self.assertIn("citation_precision", first)
+            self.assertIn("pass_rate_ci95", report["metrics"])
+
+    def test_citation_metrics_require_retrieved_evidence(self):
+        raw = suite_dict()
+        raw["questions"][0]["text"] = "xylophone quasar"
+        report = BenchmarkEngine(BenchmarkSuite.from_dict(raw), clock=StepClock(1)).run()
+        record = report["records"][0]
+        self.assertEqual(record["retrieved"], [])
+        self.assertFalse(record["citations_valid"])
+        self.assertEqual(record["citation_precision"], 0.0)
+        self.assertEqual(record["citation_recall"], 0.0)
+
+    def test_chunk_limit_is_rejected_before_chunk_materialization(self):
+        raw = suite_dict()
+        content = ("aa " * 66_666).strip()
+        raw["documents"][0]["content"] = content
+        raw["documents"][0]["sha256"] = content_sha256(content)
+        duplicate = deepcopy(raw["documents"][0])
+        duplicate["source_id"] = "handbook-copy"
+        raw["documents"].append(duplicate)
+        raw["chunk_size"] = 8
+        raw["chunk_overlap"] = 7
+        benchmark = BenchmarkEngine(BenchmarkSuite.from_dict(raw), clock=StepClock(1))
+        with patch("rag_quality_bench.engine.chunk_document") as materialize:
+            with self.assertRaisesRegex(RetrievalError, "100000"):
+                benchmark.run()
+        materialize.assert_not_called()
+
+    def test_new_reports_use_explicit_report_schema_two(self):
+        report = BenchmarkEngine(suite(), clock=StepClock(1)).run()
+        self.assertEqual(report["schema_version"], "2.0")
+
+    def test_index_manifest_detects_strategy_and_is_content_redacted(self):
+        raw = suite_dict()
+        engine = BenchmarkEngine(BenchmarkSuite.from_dict(raw), clock=StepClock(1))
+        manifest = engine.index_manifest()
+        self.assertTrue(engine.verify_index_manifest(manifest))
+        self.assertNotIn("launch city is Geneva", str(manifest))
+        manifest["chunks"][0]["token_count"] += 1
+        self.assertFalse(engine.verify_index_manifest(manifest))
